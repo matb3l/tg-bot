@@ -1,0 +1,30 @@
+# Node modules
+/node_modules/
+
+# Build output
+/dist/
+/build/
+
+# Logs
+*.log
+
+# dotenv environment variables file
+.env
+
+# IDE and editor directories
+/.idea/
+/.vscode/
+
+# TypeScript
+*.tsbuildinfo
+
+# Sequelize migration files
+/sequelize-migrations/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# NPM package lock
+package-lock.json
+yarn.lock
