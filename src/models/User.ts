@@ -1,18 +1,27 @@
-import { DataTypes, Model, Optional } from 'sequelize';
-import { sequelize } from '../config/database';
+import { DataTypes, Model, Optional } from 'sequelize'
+import { sequelize } from '../config/database'
 
 export interface UserAttributes {
-    telegram_id: string;
-    name: string;
-    nickname: string;
-    mmr: number;
-    position: string;
-    description?: string;
+    telegram_id: string
+    name: string
+    nickname: string
+    mmr: number
+    position: string
+    description?: string
 }
 
-interface UserCreationAttributes extends Optional<UserAttributes, 'description'> {}
+interface UserCreationAttributes
+    extends Optional<UserAttributes, 'description'> {}
 
-export class User extends Model<UserAttributes, UserCreationAttributes> {}
+export class User extends Model<UserAttributes, UserCreationAttributes> {
+    mmr: any
+    position: any
+    description: any
+    nickname: any
+    name: any
+    telegram_id: any
+    chatId: any
+}
 
 User.init(
     {
@@ -43,4 +52,4 @@ User.init(
         },
     },
     { sequelize, modelName: 'User' }
-);
+)
