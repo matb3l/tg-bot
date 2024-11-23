@@ -15,7 +15,7 @@ import { UserAttributes } from './models/User'
 // Load environment variables
 dotenv.config()
 
-// Initialize bot
+// Инициализация бота
 const bot = new TelegramBot(process.env.TG_BOT_TOKEN || '', { polling: true })
 
 // Keyboards
@@ -62,17 +62,34 @@ const keyboards = {
 }
 
 // Helper functions
+const handleBlockedUser = async (chatId: string) => {
+    console.log(`Удаление пользователя ${chatId} из базы данных...`)
+    await deleteUser(chatId)
+}
+
 const sendMessage = async (
     chatId: number,
     text: string,
-    keyboard?: TelegramBot.KeyboardButton[][] // Опциональный параметр
+    keyboard?: TelegramBot.KeyboardButton[][]
 ) => {
-    await bot.sendMessage(chatId, text, {
-        reply_markup: keyboard
-            ? { keyboard, resize_keyboard: true }
-            : undefined, // Проверка на наличие клавиатуры
-        parse_mode: 'HTML',
-    })
+    try {
+        await bot.sendMessage(chatId, text, {
+            reply_markup: keyboard
+                ? { keyboard, resize_keyboard: true }
+                : undefined,
+            parse_mode: 'HTML',
+        })
+    } catch (error: any) {
+        if (
+            error.code === 'ETELEGRAM' &&
+            error.response?.body?.error_code === 403
+        ) {
+            console.error(`Пользователь ${chatId} заблокировал бота.`)
+            await handleBlockedUser(chatId.toString())
+        } else {
+            console.error(`Ошибка при отправке сообщения: ${error.message}`)
+        }
+    }
 }
 
 const getPaginationKeyboard = (
