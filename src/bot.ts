@@ -16,7 +16,7 @@ import { UserAttributes } from './models/User'
 dotenv.config()
 
 // Initialize bot
-const bot = new TelegramBot(process.env.TG_BOT_TOKEN!, { polling: true })
+const bot = new TelegramBot(process.env.TG_BOT_TOKEN || '', { polling: true })
 
 // Keyboards
 const keyboards = {
