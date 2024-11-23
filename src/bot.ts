@@ -1,341 +1,503 @@
 import TelegramBot, { Message } from 'node-telegram-bot-api'
+import dotenv from 'dotenv'
 import {
     createUser,
     deleteUser,
     getAllUsers,
     getUser,
+    getUsersByMmrRange,
+    getUsersByPosition,
+    getUsersByPositionAndMmrRange,
+    updateUser,
 } from './services/userService'
-import dotenv from 'dotenv'
 import { UserAttributes } from './models/User'
 
+// Load environment variables
 dotenv.config()
 
+// Initialize bot
 const bot = new TelegramBot(process.env.TG_BOT_TOKEN!, { polling: true })
 
-const returnToMainMenu = [[{ text: 'Вернуться в главное меню' }]]
-const mainMenuKeyboard = [
-    [{ text: 'Кто мы' }, { text: 'Найти команду' }, { text: 'Правила' }],
-]
-
-const registrationSteps = [
-    { question: 'Введите свое имя:', field: 'name' },
-    { question: 'Введите описание:', field: 'description' },
-    { question: 'Введите свою позицию:', field: 'position' },
-    { question: 'Введите никнейм:', field: 'nickname' },
-]
-
-// Стартовое меню
-bot.onText(/\/start/, async (message: Message) => {
-    const chatId = message.chat.id
-    await bot.sendMessage(chatId, 'Йоу, старый! Выберите действие:', {
-        reply_markup: {
-            keyboard: mainMenuKeyboard,
-            one_time_keyboard: true,
-            resize_keyboard: true,
-        },
-    })
-})
-
-bot.onText(/Кто мы/, async (message: Message) => {
-    const chatId = message.chat.id
-
-    await bot.sendMessage(chatId, 'Мы команда', {
-        reply_markup: {
-            keyboard: returnToMainMenu,
-            one_time_keyboard: true,
-            resize_keyboard: true,
-        },
-    })
-})
-
-bot.onText(/Найти команду/, async (message: Message) => {
-    const chatId = message.chat.id
-
-    // Здесь проверяем, зарегистрирован ли пользователь
-    const user = await getUser(chatId.toString())
-    // console.log(user?.id)
-
-    if (!user) {
-        await bot.sendMessage(chatId, 'Давай зарегистрируемся')
-        await startRegistration(chatId) // Запускаем регистрацию
-    } else {
-        await bot.sendMessage(chatId, `Выбери действие:`, {
-            reply_markup: {
-                keyboard: [
-                    [{ text: 'Удалить анкету' }, { text: 'Изменить анкету' }],
-                    [
-                        { text: 'Поиск команды' },
-                        { text: 'Вернуться в главное меню' },
-                    ],
-                ],
-            },
-        })
-    }
-})
-
-const startRegistration = async (chatId: number) => {
-    const newUser: UserAttributes = {
-        name: '',
-        telegram_id: chatId.toString(),
-        mmr: 0,
-        position: '',
-        nickname: '',
-        description: '',
-    }
-
-    let currentStep = 0
-
-    const askNextQuestion = async () => {
-        if (currentStep < registrationSteps.length) {
-            const { question, field } = registrationSteps[currentStep]
-            await bot.sendMessage(chatId, question)
-            currentStep++
-
-            // Обработчик для получения ответа пользователя
-            bot.once('message', async (message: Message) => {
-                if (message.text) {
-                    // @ts-ignore
-                    newUser[field] = message.text
-                    await askNextQuestion() // Переходим к следующему вопросу
-                }
-            })
-        } else {
-            // Регистрация завершена, сохраняем пользователя
-            const user = await createUser(newUser)
-            const resume = `
-                <b>Регистрация завершена, твоя анкета:</b>\n
-                <b>Имя:</b> ${user.name}\n
-                <b>Телеграм:</b> ${user.nickname}\n
-                ${user.description ? `<b>Описание:</b> ${user.description}\n` : ''}
-            `
-
-            await bot.sendMessage(chatId, resume.trim(), { parse_mode: 'HTML' })
-
-            const menuKeyboard = [
-                [{ text: 'Удалить анкету' }, { text: 'Изменить анкету' }],
-                [
-                    { text: 'Поиск команды' },
-                    { text: 'Вернуться в главное меню' },
-                ],
-            ]
-
-            await bot.sendMessage(chatId, 'Выберите действие:', {
-                reply_markup: {
-                    keyboard: menuKeyboard,
-                    one_time_keyboard: true,
-                    resize_keyboard: true,
-                },
-            })
-        }
-    }
-
-    // Начинаем процесс
-    await askNextQuestion()
+// Keyboards
+const keyboards = {
+    mainMenu: [
+        [{ text: 'Кто мы' }, { text: 'Найти команду' }],
+        [{ text: 'Моя анкета' }],
+    ],
+    searchTeam: [
+        [{ text: 'По диапазону ММР' }],
+        [{ text: 'По позиции' }],
+        [{ text: 'По диапазону и позиции' }],
+        [{ text: 'Без фильтров' }],
+        [{ text: 'Вернуться в главное меню' }],
+    ],
+    mmrRange: [
+        [{ text: '0-3000' }],
+        [{ text: '3000-6000' }],
+        [{ text: '6000-9000' }],
+        [{ text: '9000+' }],
+        [{ text: 'Вернуться в главное меню' }],
+    ],
+    positions: [
+        [
+            { text: '1' },
+            { text: '2' },
+            { text: '3' },
+            { text: '4' },
+            { text: '5' },
+        ],
+        [{ text: 'Вернуться в главное меню' }],
+    ],
+    editProfile: [
+        [{ text: 'Имя' }, { text: 'Описание' }],
+        [{ text: 'Позиция' }, { text: 'Никнейм' }],
+        [{ text: 'MMR' }],
+        [{ text: 'Вернуться в главное меню' }],
+    ],
+    confirmDeletion: [
+        [{ text: 'Да, удалить анкету' }, { text: 'Отмена' }],
+        [{ text: 'Вернуться в главное меню' }],
+    ],
+    returnToMainMenu: [[{ text: 'Вернуться в главное меню' }]],
 }
 
-bot.onText(/Удалить анкету/, async (message: Message) => {
-    const chatId = message.chat.id
-    await deleteUser(chatId.toString()) // Удаление пользователя из базы данных
-
-    await bot.sendMessage(chatId, 'Ваша анкета была удалена.', {
-        reply_markup: {
-            keyboard: [[{ text: 'Вернуться в главное меню' }]],
-            one_time_keyboard: true,
-            resize_keyboard: true,
-        },
+// Helper functions
+const sendMessage = async (
+    chatId: number,
+    text: string,
+    keyboard?: TelegramBot.KeyboardButton[][] // Опциональный параметр
+) => {
+    await bot.sendMessage(chatId, text, {
+        reply_markup: keyboard
+            ? { keyboard, resize_keyboard: true }
+            : undefined, // Проверка на наличие клавиатуры
+        parse_mode: 'HTML',
     })
+}
+
+const getPaginationKeyboard = (
+    offset: number
+): TelegramBot.KeyboardButton[][] => {
+    const keyboard: TelegramBot.KeyboardButton[][] = []
+
+    if (offset > 0) {
+        keyboard.push([{ text: 'Назад' }])
+    }
+
+    keyboard.push([{ text: 'Далее' }])
+    keyboard.push([{ text: 'Вернуться в главное меню' }])
+
+    return keyboard
+}
+
+// Main bot handlers
+bot.onText(/\/start/, async (msg: Message) => showMainMenu(msg.chat.id))
+bot.onText(/Кто мы/, async (msg: Message) =>
+    sendMessage(msg.chat.id, 'Мы команда', keyboards.returnToMainMenu)
+)
+bot.onText(/Найти команду/, async (msg: Message) => startSearch(msg.chat.id))
+bot.onText(/Моя анкета/, async (msg: Message) => showMyProfile(msg.chat.id))
+bot.onText(/Редактировать анкету/, async (msg: Message) =>
+    editProfile(msg.chat.id)
+)
+bot.onText(/Удалить анкету/, async (msg: Message) =>
+    confirmDeleteProfile(msg.chat.id)
+)
+bot.onText(/Без фильтров/, async (msg: Message) =>
+    searchAndPaginateUsers(msg.chat.id)
+)
+bot.onText(/Вернуться в главное меню/, async (msg: Message) =>
+    showMainMenu(msg.chat.id)
+)
+
+bot.onText(/По диапазону ММР/, async (msg: Message) => {
+    const chatId = msg.chat.id
+    await sendMessage(chatId, 'Выберите диапазон ММР:', keyboards.mmrRange)
+
+    const listener = async (msg: Message) => {
+        if (msg.chat.id === chatId) {
+            const text = msg.text
+
+            // Проверяем, если это диапазон чисел
+            const mmrRange = text?.match(/(\d+)-(\d+)/)
+            if (mmrRange) {
+                bot.removeListener('message', listener)
+                const [_, minMmr, maxMmr] = mmrRange.map(Number)
+                await searchAndPaginateUsers(chatId, 0, minMmr, maxMmr)
+            }
+            // Обрабатываем "9000+"
+            else if (text === '9000+') {
+                bot.removeListener('message', listener)
+                const minMmr = 9000 // Указываем нижнюю границу
+                const maxMmr = 20000 // Верхняя граница отсутствует
+                await searchAndPaginateUsers(chatId, 0, minMmr, maxMmr) // Передаем undefined для maxMmr
+            }
+            // Обрабатываем возврат в главное меню
+            else if (text === 'Вернуться в главное меню') {
+                bot.removeListener('message', listener)
+                showMainMenu(chatId)
+            } else {
+                await sendMessage(chatId, 'Неверный выбор. Попробуйте снова.')
+            }
+        }
+    }
+
+    bot.on('message', listener)
 })
 
-bot.onText(/Изменить анкету/, async (message: Message) => {
-    const chatId = message.chat.id
+// Обработчик "По позиции"
+bot.onText(/По позиции/, async (msg: Message) => {
+    const chatId = msg.chat.id
+    await sendMessage(chatId, 'Выберите позицию:', keyboards.positions)
 
-    // Получаем данные пользователя из базы данных
+    const listener = async (msg: Message) => {
+        if (msg.chat.id === chatId) {
+            const position = msg.text
+
+            if (['1', '2', '3', '4', '5'].includes(position!)) {
+                bot.removeListener('message', listener)
+
+                await searchAndPaginateUsers(
+                    chatId,
+                    0,
+                    undefined,
+                    undefined,
+                    position
+                )
+            } else if (msg.text === 'Вернуться в главное меню') {
+                bot.removeListener('message', listener)
+                showMainMenu(chatId)
+            } else {
+                await sendMessage(
+                    chatId,
+                    'Неверный выбор. Пожалуйста, выберите позицию из списка.'
+                )
+            }
+        }
+    }
+
+    bot.on('message', listener)
+})
+
+// Обработчик "По диапазону и позиции"
+bot.onText(/По диапазону и позиции/, async (msg: Message) => {
+    const chatId = msg.chat.id
+    await sendMessage(chatId, 'Выберите диапазон ММР:', keyboards.mmrRange)
+
+    const listenerMmr = async (msg: Message) => {
+        if (msg.chat.id === chatId) {
+            const text = msg.text
+
+            const mmrRange = text?.match(/(\d+)-(\d+)/)
+            if (mmrRange) {
+                const [_, minMmr, maxMmr] = mmrRange.map(Number)
+                bot.removeListener('message', listenerMmr)
+                await handlePositionSelection(chatId, minMmr, maxMmr)
+            } else if (text === '9000+') {
+                bot.removeListener('message', listenerMmr)
+                const minMmr = 9000
+                const maxMmr = 20000
+                await searchAndPaginateUsers(chatId, 0, minMmr, maxMmr)
+            } else if (text === 'Вернуться в главное меню') {
+                bot.removeListener('message', listenerMmr)
+                showMainMenu(chatId)
+            } else {
+                await sendMessage(chatId, 'Неверный выбор. Попробуйте снова.')
+            }
+        }
+    }
+
+    bot.on('message', listenerMmr)
+})
+
+async function handlePositionSelection(
+    chatId: number,
+    minMmr: number,
+    maxMmr?: number
+): Promise<void> {
+    await sendMessage(chatId, 'Выберите позицию:', keyboards.positions)
+
+    const listenerPosition = async (msg: Message) => {
+        if (msg.chat.id === chatId) {
+            const position = msg.text
+            if (['1', '2', '3', '4', '5'].includes(position!)) {
+                bot.removeListener('message', listenerPosition)
+                await searchAndPaginateUsers(
+                    chatId,
+                    0,
+                    minMmr,
+                    maxMmr,
+                    position
+                )
+            } else if (msg.text === 'Вернуться в главное меню') {
+                bot.removeListener('message', listenerPosition)
+                showMainMenu(chatId)
+            } else {
+                await sendMessage(chatId, 'Неверный выбор. Попробуйте снова.')
+            }
+        }
+    }
+
+    bot.on('message', listenerPosition)
+}
+
+// Main menu display
+async function showMainMenu(chatId: number) {
+    const user = await getUser(chatId.toString())
+    const keyboard = user ? keyboards.mainMenu : keyboards.mainMenu.slice(0, 1)
+    await sendMessage(chatId, 'Выберите действие:', keyboard)
+}
+
+// Start search process
+async function startSearch(chatId: number) {
     const user = await getUser(chatId.toString())
     if (!user) {
-        await bot.sendMessage(
-            chatId,
-            'Вы не зарегистрированы. Пожалуйста, завершите регистрацию сначала.'
-        )
-        return
+        await sendMessage(chatId, 'Для поиска необходимо зарегистрироваться.')
+        return startRegistration(chatId)
     }
+    await sendMessage(
+        chatId,
+        'Выберите способ поиска команды:',
+        keyboards.searchTeam
+    )
+}
 
-    // Предложим пользователю выбрать, что он хочет изменить
-    const fieldsToChange = [
-        { text: 'Имя', field: 'name' },
-        { text: 'Никнейм', field: 'nickname' },
-        { text: 'Описание', field: 'description' },
-        { text: 'Позиция', field: 'position' },
+// Show profile
+async function showMyProfile(chatId: number) {
+    const user = await getUser(chatId.toString())
+    if (!user) {
+        await sendMessage(
+            chatId,
+            'У вас нет анкеты. Пожалуйста, зарегистрируйтесь сначала.'
+        )
+        return showMainMenu(chatId)
+    }
+    const profileText = `
+        <b>Имя:</b> ${user.name}
+        <b>Никнейм:</b> ${user.nickname}
+        ${user.description ? `<b>Описание:</b> ${user.description}` : ''}
+        <b>Позиция:</b> ${user.position}
+        <b>MMR:</b> ${user.mmr}
+    `.trim()
+    await sendMessage(chatId, profileText)
+    await sendMessage(chatId, 'Выберите действие:', [
+        [{ text: 'Удалить анкету' }, { text: 'Редактировать анкету' }],
+        ...keyboards.returnToMainMenu,
+    ])
+}
+
+// Registration process
+async function startRegistration(chatId: number): Promise<void> {
+    const fields: {
+        question: string
+        key: keyof UserAttributes
+        keyboard?: TelegramBot.KeyboardButton[][]
+    }[] = [
+        { question: 'Введите ваше имя:', key: 'name' },
+        { question: 'Введите описание:', key: 'description' },
+        {
+            question: 'Выберите вашу позицию:',
+            key: 'position',
+            keyboard: keyboards.positions,
+        },
+        { question: 'Введите ваш никнейм:', key: 'nickname' },
+        { question: 'Введите ваш MMR:', key: 'mmr' },
     ]
 
-    const keyboard = fieldsToChange.map((item) => [{ text: item.text }])
+    const newUser: Partial<UserAttributes> = { telegram_id: chatId.toString() }
 
-    await bot.sendMessage(chatId, 'Что вы хотите изменить?', {
-        reply_markup: {
-            keyboard,
-            one_time_keyboard: true,
-            resize_keyboard: true,
-        },
-    })
+    for (const { question, key, keyboard } of fields) {
+        await sendMessage(chatId, question, keyboard)
 
-    // Сохраняем в контексте, что сейчас идет изменение
-    bot.once('message', async (message: Message) => {
-        const selectedField = fieldsToChange.find(
-            (field) => message.text === field.text
-        )?.field
-        if (!selectedField) {
-            await bot.sendMessage(chatId, 'Вы не выбрали поле для изменения.')
+        try {
+            const response = await waitForMessage(chatId)
+            if (!response) return
+
+            if (key === 'mmr') {
+                const mmrValue = parseInt(response, 10)
+                if (isNaN(mmrValue) || mmrValue < 0) {
+                    await sendMessage(
+                        chatId,
+                        'Некорректное значение MMR. Пожалуйста, введите положительное число.'
+                    )
+                    continue // Повторяем вопрос про MMR
+                }
+                newUser[key] = mmrValue
+            } else {
+                newUser[key] = response
+            }
+        } catch (error) {
+            await sendMessage(
+                chatId,
+                'Ошибка при обработке ответа. Попробуйте снова.'
+            )
             return
         }
+    }
 
-        // Запрашиваем новый ввод для выбранного поля
-        await bot.sendMessage(chatId, `Введите новое значение:`)
+    const user = await createUser(newUser as UserAttributes)
+    if (!user) {
+        await sendMessage(chatId, 'Ошибка при регистрации. Попробуйте снова.')
+    } else {
+        await sendMessage(
+            chatId,
+            `Регистрация завершена:\n<b>Имя:</b> ${user.name}\n<b>Никнейм:</b> ${user.nickname}\n<b>MMR:</b> ${user.mmr}`,
+            keyboards.returnToMainMenu
+        )
+    }
+    await showMainMenu(chatId)
+}
 
-        // Ожидаем новый ввод от пользователя для выбранного поля
-        bot.once('message', async (message: Message) => {
-            const newValue = message.text
-
-            if (!newValue) {
-                await bot.sendMessage(
-                    chatId,
-                    'Вы не ввели новое значение. Попробуйте снова.'
-                )
-                return
-            }
-            // @ts-ignore
-            // Обновляем значение выбранного поля
-            user[selectedField] = newValue
-
-            // Сохраняем изменения в базе данных
-            await user.save()
-
-            // Показываем пользователю обновленную анкету
-            const updatedResume = `
-                <b>Ваша анкета обновлена:</b>\n
-                <b>Имя:</b> ${user.name}\n
-                <b>Никнейм:</b> ${user.nickname}\n
-                ${user.description ? `<b>Описание:</b> ${user.description}\n` : ''}
-                <b>Позиция:</b> ${user.position}\n
-            `
-
-            await bot.sendMessage(chatId, updatedResume.trim(), {
-                parse_mode: 'HTML',
-            })
-
-            // Возвращаем в главное меню
-            await bot.sendMessage(chatId, 'Что бы вы хотели сделать дальше?', {
-                reply_markup: {
-                    keyboard: [
-                        [
-                            { text: 'Изменить анкету' },
-                            { text: 'Удалить анкету' },
-                        ],
-                        [{ text: 'Поиск команды' }],
-                    ],
-                    one_time_keyboard: true,
-                    resize_keyboard: true,
-                },
-            })
-        })
-    })
-})
-
-bot.onText(/Поиск команды/, async (message: Message) => {
-    const chatId = message.chat.id
-    const users = await getAllUsers(message.chat.id.toString()) // Получаем всех пользователей из базы данных
-    let currentIndex = 0 // Индекс текущего пользователя
-
-    if (users.length === 0) {
-        await bot.sendMessage(chatId, 'Анкеты не найдены.')
+// Edit profile
+async function editProfile(chatId: number): Promise<void> {
+    const user = await getUser(chatId.toString())
+    if (!user) {
+        await sendMessage(chatId, 'У вас нет анкеты для редактирования.')
         return
     }
+    await sendMessage(chatId, 'Что вы хотите изменить?', keyboards.editProfile)
 
-    const showUser = async (index: number) => {
-        const user = users[index]
-
-        const resume = `
-            <b>Имя:</b> ${user.name}\n
-            <b>Никнейм:</b> ${user.nickname}\n
-            ${user.description ? `<b>Описание:</b> ${user.description}\n` : ''}
-            <b>Позиция:</b> ${user.position}\n
-        `
-
-        // Кнопки для навигации
-        const navigationKeyboard = [
-            // Если это первый пользователь, скрываем кнопку "Назад"
-            currentIndex > 0
-                ? [{ text: 'Назад' }, { text: 'Далее' }]
-                : [{ text: 'Далее' }],
-            [{ text: 'Вернуться в главное меню' }],
-        ]
-
-        await bot.sendMessage(chatId, resume.trim(), {
-            parse_mode: 'HTML',
-            reply_markup: {
-                keyboard: navigationKeyboard,
-                one_time_keyboard: true,
-                resize_keyboard: true,
-            },
-        })
+    const fieldMapping: Record<string, keyof UserAttributes> = {
+        Имя: 'name',
+        Описание: 'description',
+        Позиция: 'position',
+        Никнейм: 'nickname',
+        MMR: 'mmr',
     }
 
-    // Показываем первого пользователя
-    await showUser(currentIndex)
+    const response = await waitForMessage(chatId)
+    if (!response || response === 'Вернуться в главное меню') {
+        return showMainMenu(chatId)
+    }
 
-    // Обрабатываем нажатие кнопок "Далее" и "Назад"
-    bot.on('message', async (message: Message) => {
-        const text = message.text
-
-        if (text === 'Далее') {
-            // Если есть следующий пользователь, показываем его
-            if (currentIndex < users.length - 1) {
-                currentIndex++
-                await showUser(currentIndex)
+    const field = fieldMapping[response]
+    if (field) {
+        await sendMessage(chatId, `Введите новое значение для ${response}:`)
+        const newValue = await waitForMessage(chatId)
+        if (newValue) {
+            // Если редактируется MMR, проверяем, что введено число
+            if (field === 'mmr') {
+                const mmrValue = parseInt(newValue, 10)
+                if (isNaN(mmrValue) || mmrValue < 0) {
+                    await sendMessage(
+                        chatId,
+                        'Некорректное значение MMR. Пожалуйста, введите положительное число.'
+                    )
+                    return editProfile(chatId) // Повторяем процесс редактирования
+                }
+                await updateUser(chatId.toString(), { [field]: mmrValue })
+                await sendMessage(chatId, 'MMR успешно обновлен.')
             } else {
-                // Если анкеты закончились
-                await bot.sendMessage(chatId, 'Анкеты закончились.', {
-                    reply_markup: {
-                        keyboard: [[{ text: 'Вернуться в главное меню' }]],
-                        one_time_keyboard: true,
-                        resize_keyboard: true,
-                    },
-                })
+                await updateUser(chatId.toString(), { [field]: newValue })
+                await sendMessage(chatId, `${response} успешно обновлено.`)
             }
-        } else if (text === 'Назад' && currentIndex > 0) {
-            // Если есть предыдущий пользователь, показываем его
-            if (currentIndex > 0) {
-                currentIndex--
-                await showUser(currentIndex)
-            }
-            // } else if (text === 'Вернуться в главное меню') {
-            //     // Возвращаем в главное меню
-            //     const mainMenuKeyboard = [
-            //         [
-            //             { text: 'Кто мы' },
-            //             { text: 'Найти команду' },
-            //             { text: 'Правила' },
-            //         ],
-            //     ]
-            //     await bot.sendMessage(chatId, 'Привет! Выберите действие:', {
-            //         reply_markup: {
-            //             keyboard: mainMenuKeyboard,
-            //             one_time_keyboard: true,
-            //             resize_keyboard: true,
-            //         },
-            //     })
-            // }
         }
-    })
-})
-
-bot.on('message', async (message: Message) => {
-    if (message.text === 'Вернуться в главное меню') {
-        const chatId = message.chat.id
-        await bot.sendMessage(chatId, 'Выберите действие:', {
-            reply_markup: {
-                keyboard: mainMenuKeyboard,
-                one_time_keyboard: true,
-                resize_keyboard: true,
-            },
-        })
     }
-})
+    await showMyProfile(chatId)
+}
+
+// Confirm profile deletion
+async function confirmDeleteProfile(chatId: number) {
+    await sendMessage(
+        chatId,
+        'Вы уверены, что хотите удалить анкету?',
+        keyboards.confirmDeletion
+    )
+    const response = await waitForMessage(chatId)
+    if (response === 'Да, удалить анкету') {
+        await deleteUser(chatId.toString())
+        await sendMessage(chatId, 'Анкета удалена.')
+    }
+    await showMainMenu(chatId)
+}
+
+// Helper to wait for a single user response
+function waitForMessage(chatId: number): Promise<string | null> {
+    return new Promise((resolve) => {
+        const listener = (msg: Message) => {
+            if (msg.chat.id === chatId && msg.text) {
+                bot.removeListener('message', listener)
+                resolve(msg.text)
+            }
+        }
+        bot.on('message', listener)
+    })
+}
+
+async function searchAndPaginateUsers(
+    chatId: number,
+    offset: number = 0,
+    minMmr?: number,
+    maxMmr?: number,
+    position?: string
+) {
+    const limit = 1 // Количество анкет за раз
+    let users
+
+    if (
+        minMmr !== undefined &&
+        maxMmr !== undefined &&
+        position !== undefined
+    ) {
+        users = await getUsersByPositionAndMmrRange(
+            position,
+            minMmr,
+            maxMmr,
+            chatId.toString(),
+            offset,
+            limit
+        )
+    } else if (minMmr !== undefined && maxMmr !== undefined) {
+        users = await getUsersByMmrRange(
+            minMmr,
+            maxMmr,
+            chatId.toString(),
+            offset,
+            limit
+        )
+    } else if (position !== undefined) {
+        users = await getUsersByPosition(
+            position,
+            chatId.toString(),
+            offset,
+            limit
+        )
+    } else {
+        users = await getAllUsers(chatId.toString(), offset, limit)
+    }
+
+    if (!users || users.length === 0) {
+        await sendMessage(chatId, 'Анкеты закончились.')
+        return showMainMenu(chatId)
+    }
+
+    const user = users[0]
+    const profileText = `
+        <b>Имя:</b> ${user.name}
+        <b>Никнейм:</b> ${user.nickname}
+        <b>Ммр:</b>${user.mmr}
+        ${user.description ? `<b>Описание:</b> ${user.description}` : ''}
+        <b>Позиция:</b> ${user.position}
+    `.trim()
+
+    const keyboard = getPaginationKeyboard(offset)
+
+    await sendMessage(chatId, profileText, keyboard)
+
+    const listener = (msg: Message) => {
+        if (msg.chat.id !== chatId) return
+
+        if (msg.text === 'Далее') {
+            bot.removeListener('message', listener)
+            searchAndPaginateUsers(chatId, offset + 1, minMmr, maxMmr, position)
+        } else if (msg.text === 'Назад' && offset > 0) {
+            bot.removeListener('message', listener)
+            searchAndPaginateUsers(chatId, offset - 1, minMmr, maxMmr, position)
+        } else if (msg.text === 'Вернуться в главное меню') {
+            bot.removeListener('message', listener)
+            showMainMenu(chatId)
+        }
+    }
+
+    bot.on('message', listener)
+}
