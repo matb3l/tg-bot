@@ -2,10 +2,10 @@
   "development": {
     "username": "postgres",
     "password": "1234",
-    "database": "postgresDB",
+    "database": "tg",
     "host": "localhost",
     "dialect": "postgres",
-    "port": "6543"
+    "port": "5432"
   },
   "test": {
     "username": "postgres",
